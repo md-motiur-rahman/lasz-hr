@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import RotaClient from "@/components/RotaClient";
 
-export default async function RotaPage() {
+export default async function RotaPage({ searchParams }: { searchParams?: { [key: string]: string | string[] | undefined } }) {
   const cookieStore = await cookies();
   const supabase = createServerComponentClient(
     { cookies: () => cookieStore },
@@ -31,6 +31,8 @@ export default async function RotaPage() {
     .eq("owner_user_id", user?.id || "")
     .maybeSingle();
 
+  const empParam = typeof searchParams?.employee === "string" ? searchParams?.employee : null;
+
   return (
     <ProtectedShell>
       <RotaClient
@@ -39,6 +41,7 @@ export default async function RotaPage() {
         companyId={company?.id || null}
         companyName={company?.company_name || null}
         userName={profile?.full_name || null}
+        filterEmployeeId={empParam}
       />
     </ProtectedShell>
   );

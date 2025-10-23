@@ -278,6 +278,10 @@ create policy shifts_insert_admin on public.shifts for insert with check (public
 drop policy if exists shifts_update_admin on public.shifts;
 create policy shifts_update_admin on public.shifts for update using (public.is_admin_of_shift(shifts)) with check (public.is_admin_of_shift(shifts));
 
+-- Allow admins to delete shifts too
+drop policy if exists shifts_delete_admin on public.shifts;
+create policy shifts_delete_admin on public.shifts for delete using (public.is_admin_of_shift(shifts));
+
 -- Employee can read own assigned shifts (when assigned_user_id is set)
 drop policy if exists shifts_select_assigned_user on public.shifts;
 create policy shifts_select_assigned_user on public.shifts for select using (assigned_user_id = auth.uid());

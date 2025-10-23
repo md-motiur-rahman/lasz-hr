@@ -206,6 +206,20 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
 
               {/* Right column */}
               <aside className="space-y-6">
+                {/* Employee quick views */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h3 className="text-sm font-semibold text-slate-900">Employee views</h3>
+                  <div className="mt-4 grid gap-2">
+                    <Link href={`/rota?employee=${employee.id}`} className="inline-flex items-center h-9 px-3 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-sm">
+                      <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                      View rota (calendar)
+                    </Link>
+                    <Link href={`/leave?employee=${employee.id}`} className="inline-flex items-center h-9 px-3 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-sm">
+                      <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 4h18"/><path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M9 14l2 2 4-4"/></svg>
+                      View leave
+                    </Link>
+                  </div>
+                </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h3 className="text-sm font-semibold text-slate-900">Profile metadata</h3>
                   <div className="mt-4 grid gap-3 text-sm">
