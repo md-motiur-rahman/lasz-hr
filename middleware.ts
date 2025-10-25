@@ -68,7 +68,39 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  // Gate access if trial expired and subscription not active
+  const { gated, redirectTo } = await shouldGateForBilling(supabase, session.user.id, pathname);
+  if (gated) {
+    const redirectUrl = req.nextUrl.clone();
+    redirectUrl.pathname = redirectTo;
+    return NextResponse.redirect(redirectUrl);
+  }
+
   return res;
+}
+
+async function shouldGateForBilling(supabase: ReturnType<typeof createMiddlewareClient>, userId: string, pathname: string) {
+  // Allow billing routes
+  if (pathname.startsWith("/billing") || pathname.startsWith("/api/billing") || pathname.startsWith("/api/internal/billing") || pathname.startsWith("/api/auth")) {
+    return { gated: false, redirectTo: "/billing" } as const;
+  }
+  // Only gate admins (company owners)
+  const { data: company } = await (supabase as any)
+    .from("companies")
+    .select("subscription_status, trial_end_at, owner_user_id")
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  if (!company) return { gated: false, redirectTo: "/billing" } as const;
+
+  const now = new Date();
+  const trialEnd = company.trial_end_at ? new Date(company.trial_end_at) : null;
+  const trialExpired = trialEnd ? now > trialEnd : false;
+  const active = company.subscription_status === "active";
+
+  if (trialExpired && !active) {
+    return { gated: true, redirectTo: "/billing" } as const;
+  }
+  return { gated: false, redirectTo: "/billing" } as const;
 }
 
 async function isCompanyProfileCompleted(supabase: ReturnType<typeof createMiddlewareClient>, userId: string) {

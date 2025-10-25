@@ -56,6 +56,10 @@ export default function RotaClient({
   const [createEmpId, setCreateEmpId] = useState<string | null>(null);
   const [createEmpName, setCreateEmpName] = useState<string | null>(null);
   const [createEmpDept, setCreateEmpDept] = useState<string | null>(null);
+  // Export controls (only visible in individual employee view)
+  const [exportDate, setExportDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [exportRange, setExportRange] = useState<"day" | "week">("week");
+  const [downloading, setDownloading] = useState(false);
 
   const refMonthDate = useMemo(() => new Date(refMonthISO), [refMonthISO]);
   const monthStart = useMemo(() => new Date(refMonthDate.getFullYear(), refMonthDate.getMonth(), 1, 0, 0, 0, 0), [refMonthDate]);
@@ -107,7 +111,7 @@ export default function RotaClient({
       .order("start_time", { ascending: true });
 
     if (role !== "business_admin" && userId) {
-      query = query.eq("assigned_user_id", userId).eq("published", true);
+      query = query.eq("assigned_user_id", userId);
     }
     if (filterEmployeeId) {
       query = query.eq("employee_id", filterEmployeeId);
@@ -188,6 +192,42 @@ export default function RotaClient({
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toDateString();
   }
 
+  function formatYMD(date: Date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  function startOfWeek(date: Date) {
+    const d = new Date(date);
+    const day = (d.getDay() + 6) % 7; // Monday=0
+    d.setDate(d.getDate() - day);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  function endOfWeek(date: Date) {
+    const s = startOfWeek(date);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 6);
+    e.setHours(23, 59, 59, 999);
+    return e;
+  }
+
+  async function isOnLeaveOnDate(empId: string, date: Date) {
+    if (!companyId) return false;
+    const dateStr = formatYMD(date);
+    const { count, error } = await supabase
+      .from("leave_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("employee_id", empId)
+      .in("status", ["pending", "approved"])    
+      .lte("start_date", dateStr)
+      .gte("end_date", dateStr);
+    if (error) return false;
+    return (count || 0) > 0;
+  }
+
   const shiftsByDay = useMemo(() => {
     const map = new Map<string, Shift[]>();
     gridDays.forEach((d) => map.set(dayKey(d), []));
@@ -209,6 +249,12 @@ export default function RotaClient({
     if (shiftId) {
       const s = shifts.find((x) => x.id === shiftId);
       if (s) {
+        // Prevent assigning a shift when employee is on leave this day
+        if (await isOnLeaveOnDate(s.employee_id, day)) {
+          window.alert("Cannot assign shift: employee is on leave on this day.");
+          setDragLabel(null);
+          return;
+        }
         // Prevent duplicate assignment for same employee on the same day
         const key = dayKey(day);
         const dayShifts = shiftsByDay.get(key) || [];
@@ -252,6 +298,14 @@ export default function RotaClient({
       return;
     }
 
+    // Prevent assignment if employee is on leave on this day
+    if (await isOnLeaveOnDate(empId, day)) {
+      window.alert("Cannot assign shift: employee is on leave on this day.");
+      setDragLabel(null);
+      setDragOverKey(null);
+      return;
+    }
+
     const emp = employees.find((e) => e.id === empId);
     // Open create modal to set time instead of defaulting
     const d = new Date(day);
@@ -281,7 +335,7 @@ export default function RotaClient({
     setEditOpen(true);
   }
 
-  function openCreateForDay(day: Date) {
+  async function openCreateForDay(day: Date) {
     if (!filterEmployeeId) return;
 
     // Prevent duplicate for this employee on this day
@@ -290,6 +344,12 @@ export default function RotaClient({
     const exists = dayShifts.some((s) => s.employee_id === filterEmployeeId);
     if (exists) {
       window.alert("This employee already has a shift on this day.");
+      return;
+    }
+
+    // Prevent assignment if employee is on leave on this day
+    if (await isOnLeaveOnDate((filterEmployeeId as string), day)) {
+      window.alert("Cannot create shift: employee is on leave on this day.");
       return;
     }
 
@@ -338,6 +398,11 @@ export default function RotaClient({
         window.alert("This employee already has a shift on this day.");
         return;
       }
+      // Prevent creating shift if employee is on leave on this day
+      if (await isOnLeaveOnDate(createEmpId, start)) {
+        window.alert("Cannot create shift: employee is on leave on this day.");
+        return;
+      }
       // Create new shift for selected employee
       const { error } = await supabase.from("shifts").insert({
         company_id: companyId,
@@ -348,7 +413,7 @@ export default function RotaClient({
         location: null,
         role: null,
         notes: null,
-        published: false,
+        published: true,
       });
       if (error) {
         window.alert(error.message);
@@ -361,6 +426,112 @@ export default function RotaClient({
     setEditOpen(false);
     setEditShiftId(null);
     await loadShifts();
+  }
+
+  async function fetchShiftsForExport(empId: string, start: Date, end: Date) {
+    if (!companyId) return [] as { start_time: string; end_time: string; department: string | null; role: string | null }[];
+    const { data } = await supabase
+      .from("shifts")
+      .select("start_time, end_time, department, role")
+      .eq("company_id", companyId)
+      .eq("employee_id", empId)
+      .gte("start_time", start.toISOString())
+      .lte("start_time", end.toISOString())
+      .order("start_time", { ascending: true });
+    return (data as any) || [];
+  }
+
+  async function emailRota() {
+    if (!filterEmployeeId) return;
+    const base = new Date(exportDate + "T00:00:00");
+    const rangeStart = exportRange === "day" ? new Date(base) : startOfWeek(base);
+    const rangeEnd = exportRange === "day" ? new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 59, 999) : endOfWeek(base);
+    const resp = await fetch("/api/rota/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ employeeId: filterEmployeeId, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString() }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert(data?.error || "Failed to send email");
+      return;
+    }
+    alert("Rota emailed to employee");
+  }
+
+  async function downloadPdf() {
+    if (!filterEmployeeId) return;
+    setDownloading(true);
+    try {
+      const base = new Date(exportDate + "T00:00:00");
+      const rangeStart = exportRange === "day" ? new Date(base) : startOfWeek(base);
+      const rangeEnd = exportRange === "day" ? new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 59, 999) : endOfWeek(base);
+      const rows = await fetchShiftsForExport(filterEmployeeId, rangeStart, rangeEnd);
+      const { jsPDF } = await import("jspdf");
+      await import("jspdf-autotable");
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+      // Header
+      const company = companyName || "Company";
+      const empName = visibleEmployees[0]?.full_name || "Employee";
+      const dept = visibleEmployees[0]?.department || "—";
+      const rangeText = `${rangeStart.toLocaleDateString()} — ${rangeEnd.toLocaleDateString()}`;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(company, 14, 16);
+
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Employee: ${empName}`, 14, 24);
+      doc.text(`Department: ${dept}`, 14, 30);
+      doc.text(`Range: ${rangeText}`, 14, 36);
+
+      doc.setDrawColor(60);
+      doc.line(14, 40, 196, 40);
+
+      const body = rows.map((r) => {
+        const d = new Date(r.start_time);
+        const s = new Date(r.start_time);
+        const e = new Date(r.end_time);
+        const mins = Math.max(0, Math.round((e.getTime() - s.getTime()) / 60000));
+        const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+        const mm = String(mins % 60).padStart(2, "0");
+        const dayName = d.toLocaleDateString(undefined, { weekday: "short" });
+        return [
+          d.toLocaleDateString(),
+          dayName,
+          s.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          e.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          `${hh}:${mm}`,
+          (r.department || ""),
+          (r.role || ""),
+        ];
+      });
+
+      if (body.length === 0) {
+        doc.setFontSize(11);
+        doc.text("No shifts in selected range.", 14, 48);
+      } else {
+        (doc as any).autoTable({
+          startY: 46,
+          head: [["Date", "Day", "Start", "End", "Duration", "Department", "Role"]],
+          body,
+          theme: "grid",
+          styles: { fontSize: 10, cellPadding: 2 },
+          headStyles: { fillColor: [79, 70, 229], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 247, 255] },
+          margin: { left: 14, right: 14 },
+        });
+      }
+
+      const filename = `rota_${(visibleEmployees[0]?.full_name || filterEmployeeId).replace(/\s+/g, "_")}_${exportRange}_${formatYMD(rangeStart)}.pdf`;
+      doc.save(filename);
+    } catch (e: any) {
+      alert(e?.message || "Failed to generate PDF");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -493,10 +664,42 @@ export default function RotaClient({
           <section className={role === "business_admin" && !filterEmployeeId ? "lg:col-span-4" : "lg:col-span-5"}>
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               {filterEmployeeId && visibleEmployees[0] && (
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-800 px-3 py-1 text-xs">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colorFor(visibleEmployees[0].id, 0.45) }} />
-                  Viewing rota for {visibleEmployees[0].full_name}
-                </div>
+                <>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-800 px-3 py-1 text-xs">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colorFor(visibleEmployees[0].id, 0.45) }} />
+                    Viewing rota for {visibleEmployees[0].full_name}
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                    <label className="text-slate-600">Export from</label>
+                    <input
+                      type="date"
+                      value={exportDate}
+                      onChange={(e) => setExportDate(e.target.value)}
+                      className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-950"
+                    />
+                    <select
+                      value={exportRange}
+                      onChange={(e) => setExportRange(e.target.value as any)}
+                      className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-950"
+                    >
+                      <option value="day">Day</option>
+                      <option value="week">Week</option>
+                    </select>
+                    <button
+                      onClick={downloadPdf}
+                      disabled={downloading}
+                      className="h-7 px-3 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {downloading ? "Generating…" : "Download PDF"}
+                    </button>
+                    <button
+                      onClick={emailRota}
+                      className="h-7 px-3 rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+                    >
+                      Email rota (ICS)
+                    </button>
+                  </div>
+                </>
               )}
               <div className="grid grid-cols-7 gap-2 mb-2 text-[11px] text-slate-600">
                 {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d) => (
