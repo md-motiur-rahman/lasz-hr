@@ -42,9 +42,16 @@ export async function POST(req: NextRequest) {
       customer_email: user.email ?? undefined,
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing/cancelled`,
+      client_reference_id: company.id,
       metadata: {
         company_id: company.id,
         owner_user_id: user.id,
+      },
+      subscription_data: {
+        metadata: {
+          company_id: company.id,
+          owner_user_id: user.id,
+        },
       },
     });
 

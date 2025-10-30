@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import ProtectedShell from "@/components/ProtectedShell";
 import Link from "next/link";
+import Stripe from "stripe";
 
 export default async function CompanyOverviewPage() {
   const cookieStore = await cookies();
@@ -20,7 +21,7 @@ export default async function CompanyOverviewPage() {
   const { data: company } = await supabase
     .from("companies")
     .select(
-      "company_name, address, phone, company_email, paye_ref, accounts_office_ref, subscription_status, trial_start_at, trial_end_at"
+      "company_name, address, phone, company_email, paye_ref, accounts_office_ref, subscription_status, trial_start_at, trial_end_at, stripe_subscription_id"
     )
     .eq("owner_user_id", user?.id as string)
     .maybeSingle();
@@ -30,6 +31,35 @@ export default async function CompanyOverviewPage() {
   const trialDaysRemaining = trialEnd
     ? Math.ceil((trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null;
+
+  // For active subscriptions, compute next billing date and days remaining from Stripe
+  let nextBilling: Date | null = null;
+  let daysToNext: number | null = null;
+  if (status === "active" && company?.stripe_subscription_id) {
+    const sk = process.env.STRIPE_SECRET_KEY;
+    if (sk) {
+      try {
+        const stripe = new Stripe(sk, { apiVersion: "2024-06-20" });
+        const sub = await stripe.subscriptions.retrieve(company.stripe_subscription_id);
+        if (sub.current_period_end) {
+          nextBilling = new Date(sub.current_period_end * 1000);
+          daysToNext = Math.ceil((nextBilling.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        }
+        // Reconcile DB status with Stripe if different
+        const newStatus = sub.status === "canceled" ? "canceled" : (sub.status === "past_due" ? "past_due" : (sub.status === "active" ? "active" : null));
+        if (newStatus && newStatus !== status) {
+          try {
+            await supabase
+              .from("companies")
+              .update({ subscription_status: newStatus, stripe_subscription_id: newStatus === "canceled" ? null : company.stripe_subscription_id })
+              .eq("owner_user_id", user?.id as string);
+          } catch {}
+        }
+      } catch (e) {
+        // ignore errors; show fallback UI
+      }
+    }
+  }
 
   const StatusBadge = () => {
     if (status === "active") {
@@ -48,8 +78,24 @@ export default async function CompanyOverviewPage() {
         </span>
       );
     }
+    if (status === "past_due") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium px-3 py-1">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 6v6l3 3"/></svg>
+          Past due
+        </span>
+      );
+    }
+    if (status === "canceled") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 text-slate-700 text-xs font-medium px-3 py-1">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M6 18 18 6"/></svg>
+          Canceled
+        </span>
+      );
+    }
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium px-3 py-1">
+      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 text-xs font-medium px-3 py-1">
         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 6v6l3 3"/></svg>
         Inactive
       </span>
@@ -93,12 +139,12 @@ export default async function CompanyOverviewPage() {
                 <div className="mt-2"><StatusBadge /></div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <div className="text-slate-500">Trial end</div>
-                <div className="mt-2 font-medium text-slate-900">{trialEnd ? trialEnd.toLocaleDateString() : "—"}</div>
+                <div className="text-slate-500">{status === "active" ? "Next billing" : "Trial end"}</div>
+                <div className="mt-2 font-medium text-slate-900">{status === "active" ? (nextBilling ? nextBilling.toLocaleDateString() : "—") : (trialEnd ? trialEnd.toLocaleDateString() : "—")}</div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="text-slate-500">Days remaining</div>
-                <div className="mt-2 font-medium text-slate-900">{typeof trialDaysRemaining === "number" && trialDaysRemaining >= 0 ? trialDaysRemaining : "—"}</div>
+                <div className="mt-2 font-medium text-slate-900">{status === "active" ? ((typeof daysToNext === "number" && daysToNext >= 0) ? daysToNext : "—") : ((typeof trialDaysRemaining === "number" && trialDaysRemaining >= 0) ? trialDaysRemaining : "—")}</div>
               </div>
             </div>
           </div>
@@ -177,7 +223,10 @@ export default async function CompanyOverviewPage() {
                 {status === "trialing" && trialEnd && (
                   <>Trial ends on <span className="font-medium">{trialEnd.toLocaleDateString()}</span>{typeof trialDaysRemaining === "number" && trialDaysRemaining >= 0 && (<> ({trialDaysRemaining} day{trialDaysRemaining === 1 ? "" : "s"} left)</>)}.</>
                 )}
-                {status === "active" && <>Subscription active</>}
+                {status === "active" && (
+                  <>Next billing on <span className="font-medium">{nextBilling ? nextBilling.toLocaleDateString() : "—"}</span>{typeof daysToNext === "number" && daysToNext >= 0 && (<> ({daysToNext} day{daysToNext === 1 ? "" : "s"} left)</>)}.</>
+                )}
+                {status === "canceled" && <>Subscription canceled</>}
                 {!status && <>No subscription yet</>}
               </div>
               <div className="mt-4 flex gap-3">

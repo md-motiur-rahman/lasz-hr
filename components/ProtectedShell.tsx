@@ -136,6 +136,11 @@ export default function ProtectedShell({ children }: { children: React.ReactNode
           })}
         </nav>
         <div className="absolute bottom-3 left-0 right-0 px-2 space-y-1">
+          {/* Quick actions */}
+          <Link href="/settings" className={`flex items-center ${collapsed ? "justify-start gap-0 px-1" : "gap-3 px-3"} rounded-md py-2 text-slate-800 hover:bg-slate-200`} title={collapsed ? "Settings" : undefined}>
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 3.4l.06.06a1.65 1.65 0 0 0 1.82.33h.06A1.65 1.65 0 0 0 10.5 2H10.6a2 2 0 1 1 4 0v.09c0 .67.39 1.27 1 1.51h.06c.62.26 1.34.12 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.06c.26.62.12 1.34-.33 1.82l-.06.06c-.39.39-.93.59-1.5.59h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            {!collapsed && <span className="text-sm font-medium truncate">Settings</span>}
+          </Link>
           {/* Admin profile quick action only at bottom */}
           <Link href="/admin/profile" className={`flex items-center ${collapsed ? "justify-start gap-0 px-1" : "gap-3 px-3"} rounded-md py-2 text-slate-800 hover:bg-slate-200`} title={collapsed ? "Admin profile" : undefined}>
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>

@@ -95,9 +95,11 @@ async function shouldGateForBilling(supabase: ReturnType<typeof createMiddleware
   const now = new Date();
   const trialEnd = company.trial_end_at ? new Date(company.trial_end_at) : null;
   const trialExpired = trialEnd ? now > trialEnd : false;
-  const active = company.subscription_status === "active";
+  const status = company.subscription_status as string | null;
+  const active = status === "active";
 
-  if (trialExpired && !active) {
+  // Gate if trial expired and not active, or if subscription is canceled
+  if ((trialExpired && !active) || status === "canceled") {
     return { gated: true, redirectTo: "/billing" } as const;
   }
   return { gated: false, redirectTo: "/billing" } as const;

@@ -3,7 +3,11 @@ import { cookies } from "next/headers";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import LeaveClient from "@/components/LeaveClient";
 
-export default async function LeavePage({ searchParams }: { searchParams: { employee?: string } }) {
+export default async function LeavePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ employee?: string }>;
+}) {
   const cookieStore = await cookies();
   const supabase = createServerComponentClient(
     { cookies: () => cookieStore },
@@ -17,7 +21,8 @@ export default async function LeavePage({ searchParams }: { searchParams: { empl
     data: { user },
   } = await supabase.auth.getUser();
 
-  const requestedEmployeeId = typeof searchParams?.employee === "string" ? searchParams.employee : undefined;
+  const params = await searchParams;
+  const requestedEmployeeId = typeof params?.employee === "string" ? params.employee : undefined;
 
   let role: string | null = null;
   let companyId: string | null = null;

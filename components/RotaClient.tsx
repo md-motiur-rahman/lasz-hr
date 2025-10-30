@@ -52,6 +52,7 @@ export default function RotaClient({
   const [editDayISO, setEditDayISO] = useState<string | null>(null);
   const [editStart, setEditStart] = useState("09:00");
   const [editEnd, setEditEnd] = useState("17:00");
+  const [editBreakMins, setEditBreakMins] = useState<string>("0");
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [createEmpId, setCreateEmpId] = useState<string | null>(null);
   const [createEmpName, setCreateEmpName] = useState<string | null>(null);
@@ -104,7 +105,7 @@ export default function RotaClient({
     if (!companyId) return;
     let query = supabase
       .from("shifts")
-      .select("id, employee_id, department, start_time, end_time, location, role, published, notes, employees:employees!shifts_employee_id_fkey(full_name)")
+      .select("id, employee_id, department, start_time, end_time, break_minutes, location, role, published, notes, employees:employees!shifts_employee_id_fkey(full_name)")
       .eq("company_id", companyId)
       .gte("start_time", monthStart.toISOString())
       .lt("start_time", new Date(refMonthDate.getFullYear(), refMonthDate.getMonth() + 1, 1, 0, 0, 0, 0).toISOString())
@@ -131,6 +132,7 @@ export default function RotaClient({
         role: s.role,
         published: s.published,
         notes: s.notes,
+        break_minutes: (s as any).break_minutes ?? 0,
       })) || []
     );
   }
@@ -313,6 +315,7 @@ export default function RotaClient({
     setEditDayISO(d.toISOString());
     setEditStart("");
     setEditEnd("");
+    setEditBreakMins("0");
     setCreateEmpId(empId);
     setCreateEmpName(emp?.full_name || "");
     setCreateEmpDept(emp?.department || null);
@@ -332,6 +335,7 @@ export default function RotaClient({
     const hhmm = (x: Date) => `${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
     setEditStart(hhmm(s));
     setEditEnd(hhmm(e));
+    setEditBreakMins(String((shift as any).break_minutes ?? 0));
     setEditOpen(true);
   }
 
@@ -359,6 +363,7 @@ export default function RotaClient({
     setEditDayISO(d.toISOString());
     setEditStart("");
     setEditEnd("");
+    setEditBreakMins("0");
     setCreateEmpId(filterEmployeeId);
     setCreateEmpName(emp?.full_name || "");
     setCreateEmpDept(emp?.department || null);
@@ -388,7 +393,7 @@ export default function RotaClient({
 
     if (editShiftId) {
       // Update existing shift
-      await supabase.from("shifts").update({ start_time: start.toISOString(), end_time: end.toISOString() }).eq("id", editShiftId);
+      await supabase.from("shifts").update({ start_time: start.toISOString(), end_time: end.toISOString(), break_minutes: Number(editBreakMins) || 0 }).eq("id", editShiftId);
     } else if (createEmpId && companyId) {
       // Prevent duplicate for this employee on this day
       const sameDayExists = shifts.some(
@@ -410,6 +415,7 @@ export default function RotaClient({
         department: createEmpDept || null,
         start_time: start.toISOString(),
         end_time: end.toISOString(),
+        break_minutes: Number(editBreakMins) || 0,
         location: null,
         role: null,
         notes: null,
@@ -432,7 +438,7 @@ export default function RotaClient({
     if (!companyId) return [] as { start_time: string; end_time: string; department: string | null; role: string | null }[];
     const { data } = await supabase
       .from("shifts")
-      .select("start_time, end_time, department, role")
+      .select("start_time, end_time, department, role, break_minutes")
       .eq("company_id", companyId)
       .eq("employee_id", empId)
       .gte("start_time", start.toISOString())
@@ -494,7 +500,9 @@ export default function RotaClient({
         const d = new Date(r.start_time);
         const s = new Date(r.start_time);
         const e = new Date(r.end_time);
-        const mins = Math.max(0, Math.round((e.getTime() - s.getTime()) / 60000));
+        let mins = Math.max(0, Math.round((e.getTime() - s.getTime()) / 60000));
+        const b = (r as any).break_minutes ?? 0;
+        mins = Math.max(0, mins - (typeof b === "number" ? b : Number(b) || 0));
         const hh = String(Math.floor(mins / 60)).padStart(2, "0");
         const mm = String(mins % 60).padStart(2, "0");
         const dayName = d.toLocaleDateString(undefined, { weekday: "short" });
@@ -789,6 +797,13 @@ export default function RotaClient({
               <div>
                 <label className="block text-xs text-slate-600 mb-1">End</label>
                 <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950" />
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-4 items-end">
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">Break (minutes)</label>
+                <input type="number" min={0} step={5} value={editBreakMins} onChange={(e) => setEditBreakMins(e.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950" />
+                <p className="text-[10px] text-slate-500 mt-1">Unpaid break time deducted from total duration.</p>
               </div>
             </div>
             <div className="mt-6 flex items-center justify-between">

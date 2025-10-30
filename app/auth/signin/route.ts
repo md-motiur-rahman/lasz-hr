@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json();
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });

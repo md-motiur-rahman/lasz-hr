@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
-import nodemailer from "nodemailer";
+import nodemailer from "nodemailer"
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 
@@ -76,7 +76,7 @@ function buildPdf(
   department: string,
   rangeStart: Date,
   rangeEnd: Date,
-  events: { start_time: string; end_time: string; department?: string | null; role?: string | null }[]
+  events: { start_time: string; end_time: string; department?: string | null; role?: string | null; break_minutes?: number | null }[]
 ) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const rangeText = `${rangeStart.toLocaleDateString()} — ${rangeEnd.toLocaleDateString()}`;
@@ -99,12 +99,18 @@ function buildPdf(
     const s = new Date(r.start_time);
     const e = new Date(r.end_time);
     const dayName = d.toLocaleDateString(undefined, { weekday: "short" });
+    // compute duration minus break
+    let mins = Math.max(0, Math.round((e.getTime() - s.getTime()) / 60000));
+    const bm = (r as any).break_minutes ?? 0;
+    mins = Math.max(0, mins - (typeof bm === "number" ? bm : Number(bm) || 0));
+    const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+    const mm = String(mins % 60).padStart(2, "0");
     return [
       d.toLocaleDateString(),
       dayName,
       s.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       e.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      humanDuration(s, e),
+      `${hh}:${mm}`,
       r.department || "",
       r.role || "",
     ];
@@ -166,14 +172,14 @@ export async function POST(req: NextRequest) {
 
     const { data: shifts } = await supabase
       .from("shifts")
-      .select("id, start_time, end_time, department, role")
+      .select("id, start_time, end_time, department, role, break_minutes")
       .eq("company_id", company.id)
       .eq("employee_id", employeeId)
       .gte("start_time", new Date(rangeStart).toISOString())
       .lte("start_time", new Date(rangeEnd).toISOString())
       .order("start_time", { ascending: true });
 
-    const events = (shifts || []).map((s) => ({ id: s.id, start_time: s.start_time, end_time: s.end_time, department: s.department, role: s.role }));
+    const events = (shifts || []).map((s) => ({ id: s.id, start_time: s.start_time, end_time: s.end_time, department: s.department, role: s.role, break_minutes: (s as any).break_minutes ?? 0 }));
 
     const organizerName = company.company_name || "Company";
     const organizerEmail = extractEmail(process.env.EMAIL_FROM) || process.env.SMTP_USER || "";

@@ -259,6 +259,7 @@ create table if not exists public.shifts (
   department text,
   start_time timestamptz not null,
   end_time timestamptz not null,
+  break_minutes int not null default 0,
   location text,
   role text,
   notes text,
@@ -270,6 +271,8 @@ create table if not exists public.shifts (
 
 -- Ensure default published=true on existing installations
 alter table public.shifts alter column published set default true;
+-- Ensure break_minutes exists with default 0 on existing installations
+alter table public.shifts add column if not exists break_minutes int not null default 0;
 create index if not exists shifts_company_idx on public.shifts(company_id);
 create index if not exists shifts_time_idx on public.shifts(start_time);
 create index if not exists shifts_employee_idx on public.shifts(employee_id);

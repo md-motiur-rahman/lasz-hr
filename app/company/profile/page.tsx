@@ -18,6 +18,7 @@ interface CompanyRecord {
   subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
   trial_start_at?: string | null;
   trial_end_at?: string | null;
+  stripe_subscription_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -42,6 +43,8 @@ export default function CompanyProfilePage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<CompanyRecord["subscription_status"]>(null);
   const [trialStart, setTrialStart] = useState<string | null>(null);
   const [trialEnd, setTrialEnd] = useState<string | null>(null);
+  const [stripeSubId, setStripeSubId] = useState<string | null>(null);
+  const [nextBillingAt, setNextBillingAt] = useState<string | null>(null);
 
   // Compute remaining trial days
   const trialDaysRemaining = useMemo(() => {
@@ -51,6 +54,14 @@ export default function CompanyProfilePage() {
     const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
     return diff;
   }, [trialEnd]);
+
+  const daysToNextBilling = useMemo(() => {
+    if (!nextBillingAt) return null;
+    const end = new Date(nextBillingAt).getTime();
+    const now = Date.now();
+    const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+    return diff;
+  }, [nextBillingAt]);
 
   useEffect(() => {
     let mounted = true;
@@ -90,6 +101,7 @@ export default function CompanyProfilePage() {
         setSubscriptionStatus(company.subscription_status ?? null);
         setTrialStart(company.trial_start_at ?? null);
         setTrialEnd(company.trial_end_at ?? null);
+        setStripeSubId((company as any).stripe_subscription_id ?? null);
       } else {
         // Prefill from user metadata on first-time load
         const metaName = (user.user_metadata as any)?.company_name || "";
@@ -102,6 +114,27 @@ export default function CompanyProfilePage() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadNextBilling() {
+      try {
+        if (subscriptionStatus === "active" && stripeSubId) {
+          const resp = await fetch(`/api/billing/subscription?subId=${encodeURIComponent(stripeSubId)}`, { cache: "no-store" });
+          const data = await resp.json();
+          if (!cancelled && data?.nextBillingAt) {
+            setNextBillingAt(data.nextBillingAt);
+          }
+        } else {
+          setNextBillingAt(null);
+        }
+      } catch {
+        if (!cancelled) setNextBillingAt(null);
+      }
+    }
+    loadNextBilling();
+    return () => { cancelled = true; };
+  }, [subscriptionStatus, stripeSubId]);
 
   const saveProfile = async () => {
     if (!userId) return;
@@ -217,7 +250,12 @@ export default function CompanyProfilePage() {
                 </div>
               )}
               {subscriptionStatus === "active" && (
-                <div className="mt-3 text-sm text-slate-700">Subscription active. Thank you for choosing LASZ HR.</div>
+                <div className="mt-3 text-sm text-slate-700">
+                  Next billing on <span className="font-medium">{nextBillingAt ? new Date(nextBillingAt).toLocaleDateString() : "—"}</span>
+                  {typeof daysToNextBilling === "number" && daysToNextBilling >= 0 && (
+                    <> ({daysToNextBilling} day{daysToNextBilling === 1 ? "" : "s"} left)</>
+                  )}
+                </div>
               )}
               {!subscriptionStatus && (
                 <div className="mt-3 text-sm text-slate-700">Start your 7-day free trial by completing your company profile.</div>
@@ -361,7 +399,9 @@ export default function CompanyProfilePage() {
                 {subscriptionStatus === "trialing" && trialEnd && (
                   <>Trial ends on <span className="font-medium">{new Date(trialEnd).toLocaleDateString()}</span></>
                 )}
-                {subscriptionStatus === "active" && <>Subscription active</>}
+                {subscriptionStatus === "active" && (
+                  <>Next billing on <span className="font-medium">{nextBillingAt ? new Date(nextBillingAt).toLocaleDateString() : "—"}</span>{typeof daysToNextBilling === "number" && daysToNextBilling >= 0 && (<> ({daysToNextBilling} day{daysToNextBilling === 1 ? "" : "s"} left)</>)} </>
+                )}
                 {!subscriptionStatus && <>Not started</>}
               </div>
               <div className="mt-4 grid gap-2 text-xs text-slate-600">
